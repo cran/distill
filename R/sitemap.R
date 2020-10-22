@@ -1,4 +1,55 @@
 
+
+write_search_json <- function(site_dir, config) {
+
+  # path to search.json
+  site_output_dir <- file.path(site_dir, config$output_dir)
+  search_json <- file.path(site_output_dir, "search.json")
+
+  # top-level articles
+  input_files <- list.files(site_dir, pattern = "^[^_].*\\.[Rr]?md$")
+  articles <- lapply(input_files, function(file) {
+    html_file <- file_with_ext(file, "html")
+    path <- normalize_path(file.path(site_output_dir, html_file))
+    contents <- article_contents(path)
+    metadata <- rmarkdown::yaml_front_matter(file.path(site_dir, file))
+    article <- list()
+    article$path = as_utf8(html_file)
+    article$title <- as_utf8(metadata$title)
+    article$description <- as_utf8(metadata$description)
+    article$author = lapply(metadata$author, function(author) {
+      list(
+        name = as_utf8(author$name),
+        url = author$url
+      )
+    })
+    article$date <- as_utf8(metadata$date)
+    article$contents = as_utf8(contents)
+    article$last_modified = time_as_iso_8601(file.info(path)$mtime)
+    article
+  })
+
+  # filter on existence
+  articles <- Filter(function(x) file.exists(file.path(site_output_dir, x$path)), articles)
+
+  # include articles
+  articles_json <- list(
+    articles = articles
+  )
+
+  # include collections (if any)
+  collections <- names(site_collections(site_dir, config))
+  if (length(collections) > 0) {
+    articles_json$collections = I(paste0(collections,"/",collections,".json"))
+  } else {
+    articles_json$collections = character()
+  }
+
+  # save as json
+  write_articles_json(articles_json, search_json)
+
+}
+
 write_sitemap_xml <- function(site_dir, site_config) {
 
   # don't write sitemap unless we have a base_url
@@ -73,22 +124,18 @@ write_feed_xml_html_content <- function(input_path, article, site_config) {
             to = rmd_dir,
             recursive = TRUE)
 
-  # fix headers
-  rmd_content <- paste0(readLines(input_path), collapse = "\n")
-  rmd_content <- gsub("---.*---", "", rmd_content)
-  writeLines(rmd_content, rmd_file)
-
   # render doc
   rmarkdown::render(rmd_file,
-                    output_format = "html_document",
+                    output_format = "html_fragment",
                     output_file = html_file,
                     quiet = TRUE,
-                    output_options = list(self_contained = FALSE))
+                    output_options = list(
+                      self_contained = FALSE,
+                      section_divs = FALSE
+                    ))
 
-  # extract body
+  # read contents
   html_contents <- paste(readLines(html_file), collapse = "\n")
-  html_contents <- gsub(".*<body[^>]*>", "", html_contents)
-  html_contents <- gsub("</body>.*", "", html_contents)
 
   # fix image paths
   html_contents <- gsub(paste0(basename(dirname(rmd_file)), "/"),
@@ -168,6 +215,13 @@ write_feed_xml <- function(feed_xml, site_config, collection, articles) {
     last_build_date <- Sys.Date()
   add_child(channel, "lastBuildDate", text = date_as_rfc_2822(last_build_date))
 
+  # read all rss nodes (used for checking md5s)
+  rss_nodes <- NULL
+  rss_path <- file.path(site_config$output_dir, feed_xml)
+  if (file.exists(rss_path)) {
+    rss_nodes <- xml2::read_xml(rss_path)
+  }
+
   # add entries to channel
   for (article in articles) {
 
@@ -189,9 +243,7 @@ write_feed_xml <- function(feed_xml, site_config, collection, articles) {
 
     if (length(full_content_path) > 0) {
       rss_md5 <- NULL
-      rss_path <- file.path(site_config$output_dir, feed_xml)
-      if (file.exists(rss_path)) {
-        rss_nodes <- xml2::read_xml(rss_path)
+      if (!is.null(rss_nodes)) {
         rss_article_base <- url_path(site_config$base_url, article$path)
 
         rss_entry <- xml2::xml_find_all(rss_nodes, paste0("/rss/channel/item/link[text()='", rss_article_base, "']/.."))

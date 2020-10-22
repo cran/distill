@@ -4,8 +4,8 @@ navigation_in_header <- function(site_config, offset) {
   render_navigation_html(navigation_in_header_html(site_config, offset))
 }
 
-navigation_before_body <- function(site_config, offset) {
-  render_navigation_html(navigation_before_body_html(site_config, offset))
+navigation_before_body <- function(site_dir, site_config, offset) {
+  render_navigation_html(navigation_before_body_html(site_dir, site_config, offset))
 }
 
 navigation_after_body <- function(site_dir, site_config, offset) {
@@ -16,8 +16,8 @@ navigation_in_header_file <- function(site_config, offset = NULL) {
   render_navigation_html_file(navigation_in_header_html(site_config, offset))
 }
 
-navigation_before_body_file <- function(site_config, offset = NULL) {
-  render_navigation_html_file(navigation_before_body_html(site_config, offset))
+navigation_before_body_file <- function(site_dir, site_config, offset = NULL) {
+  render_navigation_html_file(navigation_before_body_html(site_dir, site_config, offset))
 }
 
 navigation_after_body_file <- function(site_dir, site_config, offset = NULL) {
@@ -36,7 +36,7 @@ navigation_html_generator <- function() {
       # generate html and assign into cache
       assign(offset, envir = cache, list(
         in_header = navigation_in_header(site_config, offset),
-        before_body = navigation_before_body(site_config, offset),
+        before_body = navigation_before_body(site_dir, site_config, offset),
         after_body = navigation_after_body(site_dir, site_config, offset)
       ))
     }
@@ -51,14 +51,25 @@ navigation_in_header_html <- function(site_config, offset) {
 
   if (!is.null(site_config[["navbar"]])) {
 
-    in_header_html <- html_from_file(
+    navbar_html <- html_from_file(
       system.file("rmarkdown/templates/distill_article/resources/navbar.html",
                   package = "distill")
     )
 
+    if (site_search_enabled(site_config)) {
+      search_html <- html_from_file(
+        system.file("rmarkdown/templates/distill_article/resources/search.html",
+                    package = "distill")
+      )
+    } else {
+      search_html <- NULL
+    }
+
     in_header_html <- tagList(
       HTML("<!--radix_placeholder_navigation_in_header-->"),
-      in_header_html,
+      htmltools::tags$meta(name = "distill:offset",
+                           content = strip_trailing_slash(not_null(offset))),
+      navbar_html,
       lapply(site_dependencies(site_config), function(lib) {
         if (!is.null(offset))
           lib$path <- file.path(offset, lib$path)
@@ -67,6 +78,7 @@ navigation_in_header_html <- function(site_config, offset) {
           lapply(lib$dep$script, function(script) { tags$script(src = file.path(lib$path, script)) } )
         )
       }),
+      search_html,
       HTML("<!--/radix_placeholder_navigation_in_header-->")
     )
 
@@ -78,7 +90,7 @@ navigation_in_header_html <- function(site_config, offset) {
 
 }
 
-navigation_before_body_html <- function(site_config, offset) {
+navigation_before_body_html <- function(site_dir, site_config, offset) {
 
   # helper to apply offset (if any)
   offset_href <- function(href) {
@@ -150,14 +162,40 @@ navigation_before_body_html <- function(site_config, offset) {
       }
     }
 
+    search_default = length(site_collections(site_dir, site_config)) > 0
+    if (site_search_enabled(site_config, search_default)) {
+      search_box <- tag("input", list(id = "distill-search", class="nav-search hidden",
+                                      type = "text", placeholder = "Search..."))
+    } else {
+      search_box <- NULL
+    }
+
     left_nav <- div(class = "nav-left",
                     logo,
                     a(href = offset_href("index.html"), class = "title", site_config$navbar$title),
-                    build_menu(site_config[["navbar"]][["left"]])
+                    build_menu(site_config[["navbar"]][["left"]]),
+                    search_box
     )
 
+    # ensure we have a valid right menu target
+    right_menu <- site_config[["navbar"]][["right"]]
+    if (is.null(right_menu))
+      right_menu <- list()
+
+    # see if we need to add a source lnk
+    navbar_repo_url <- navbar_repo_url(site_config)
+    if (!is.null(navbar_repo_url)) {
+      right_menu <- append(right_menu, list(
+        list(
+          href = navbar_repo_url,
+          icon = navbar_repo_icon(navbar_repo_url),
+          text = "Link to source"
+        )
+      ))
+    }
+
     right_nav <- div(class = "nav-right",
-                     build_menu(site_config[["navbar"]][["right"]]),
+                     build_menu(right_menu),
                      a(href = "javascript:void(0);", class = "nav-toggle", HTML("&#9776;"))
     )
 
@@ -172,6 +210,29 @@ navigation_before_body_html <- function(site_config, offset) {
   }
 
   placeholder_html("navigation_before_body", header)
+}
+
+navbar_repo_url <- function(site_config) {
+  repo_url <- site_config[["repository_url"]]
+  source_url <- site_config[["navbar"]][["source_url"]]
+  if (is.character(source_url)) {
+    source_url
+  } else if (isTRUE(source_url) && !is.null(repo_url)) {
+    repo_url
+  } else {
+    NULL
+  }
+}
+
+navbar_repo_icon <- function(repo_url) {
+  if (grepl("github.com", repo_url, fixed = TRUE))
+    "fab fa-github"
+  else if (grepl("gitlab.com", repo_url, fixed = TRUE))
+    "fab fa-gitlab"
+  else if (grepl("bitbucket.org", repo_url, fixed = TRUE))
+    "fab fa-bitbucket"
+  else
+    "fa fa-code"
 }
 
 navigation_after_body_html <- function(site_dir, site_config, offset) {
@@ -288,15 +349,35 @@ site_dependencies <- function(site_config) {
   }
 
   if (length(site_config) > 0) {
-    list(
+    deps <- list(
       site_dependency(html_dependency_font_awesome()),
       site_dependency(html_dependency_headroom())
     )
+    if (site_search_enabled(site_config)) {
+      deps <- append(deps, list(
+        site_dependency(html_dependency_autocomplete()),
+        site_dependency(html_dependency_fuse())
+      ))
+    }
+    deps
   } else {
     list()
   }
 }
 
+
+site_search_enabled <- function(site_config, default = TRUE) {
+  navbar <- site_config[["navbar"]]
+  if (is.list(navbar)) {
+    search <- site_config[["navbar"]][["search"]]
+    if (is.logical(search))
+      search
+    else
+      default
+  } else {
+    FALSE
+  }
+}
 
 
 

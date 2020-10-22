@@ -25,6 +25,36 @@ html_dependency_webcomponents <- function() {
   )
 }
 
+# https://github.com/bryanbraun/anchorjs
+html_dependency_anchor <- function() {
+  htmltools::htmlDependency(
+    name = "anchor",
+    version = "4.2.2",
+    src = system.file("www/anchor", package = "distill"),
+    script = c("anchor.min.js")
+  )
+}
+
+# https://github.com/algolia/autocomplete.js
+html_dependency_autocomplete <- function() {
+  htmltools::htmlDependency(
+    name = "autocomplete",
+    version = "0.37.1",
+    src = system.file("www/autocomplete", package = "distill"),
+    script = c("autocomplete.min.js")
+  )
+}
+
+# https://github.com/krisk/fuse
+html_dependency_fuse <- function() {
+  htmltools::htmlDependency(
+    name = "fuse",
+    version = "6.4.1",
+    src = system.file("www/fuse", package = "distill"),
+    script = c("fuse.min.js")
+  )
+}
+
 html_dependency_headroom <- function() {
   htmltools::htmlDependency(
     name = "headroom",

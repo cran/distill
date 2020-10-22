@@ -76,8 +76,9 @@ render_collections <- function(site_dir, site_config, collections, quiet = FALSE
   # caching html generator
   navigation_html <- navigation_html_generator()
 
-  # distill html
-  distill_html <- distill_in_header()
+  # distill html (w/ theme if available)
+  theme <- theme_from_site_config(site_dir, site_config)
+  distill_html <- distill_in_header(theme)
 
   # site includes
   site_includes <- site_includes(site_dir, site_config)
@@ -98,10 +99,12 @@ render_collections <- function(site_dir, site_config, collections, quiet = FALSE
 }
 
 
-render_collection <- function(site_dir, site_config, collection,
-                              navigation_html = navigation_html_generator(),
-                              distill_html = distill_in_header(),
-                              site_includes = site_includes(site_dir, site_config),
+render_collection <- function(site_dir,
+                              site_config,
+                              collection,
+                              navigation_html,
+                              distill_html,
+                              site_includes,
                               quiet = FALSE) {
 
   if (!quiet)
@@ -239,6 +242,9 @@ publish_collection_article_to_site <- function(site_dir, site_config, encoding,
     input_file = input_file
   )
 
+  # get site theme
+  theme <- theme_from_site_config(site_dir, site_config)
+
   # render the article
   output_file <- render_collection_article(
     site_dir = site_dir,
@@ -246,7 +252,7 @@ publish_collection_article_to_site <- function(site_dir, site_config, encoding,
     collection = collection,
     article = article,
     navigation_html = navigation_html_generator(),
-    distill_html = distill_in_header(),
+    distill_html = distill_in_header(theme),
     site_includes = site_includes(site_dir, site_config),
     strip_trailing_newline = strip_trailing_newline,
     quiet = TRUE
@@ -257,6 +263,20 @@ publish_collection_article_to_site <- function(site_dir, site_config, encoding,
 
   # return output file
   output_file
+}
+
+# theme can either be specified @ site_config level or as an article option
+theme_from_site_config <- function(site_dir, site_config) {
+  theme <- site_config$theme
+  if (is.null(theme)) {
+    with_distill_output_options(site_config, function(output_options) {
+      theme <<- output_options$theme
+    })
+  }
+  if (!is.null(theme))
+    file.path(site_dir, theme)
+  else
+    theme
 }
 
 
@@ -324,7 +344,7 @@ update_collection_listing <- function(site_dir, site_config, collection, article
                      articles)
 
   # re-write the index
-  write_articles_info(articles, collection_index)
+  write_articles_json(articles, collection_index)
 
   # re-write the sitemap
   write_sitemap_xml(site_dir, site_config)
@@ -499,6 +519,11 @@ render_collection_article <- function(site_dir, site_config, collection, article
   index_content <- apply_site_include(index_content, "before_body")
   index_content <- apply_site_include(index_content, "after_body")
 
+  # categories
+  index_content <- fill_placeholder(index_content, "categories", placeholder_html(
+    "categories", categories_html(collection, offset, article)
+  ))
+
   # article footer
   index_content <- fill_placeholder(index_content, "article_footer", placeholder_html(
     "article_footer", article_footer_html(site_dir, site_config, collection, article)
@@ -524,6 +549,20 @@ render_collection_article <- function(site_dir, site_config, collection, article
 
   # return path to rendered article
   index_html
+}
+
+categories_html <- function(collection, offset, article) {
+
+  if (identical(collection$name, "posts") && !is.null(article$metadata$categories)) {
+    div(class = "dt-tags",
+      lapply(article$metadata$categories, function(category) {
+        href <- paste0(offset, "/index.html", category_hash(category))
+        a(href = href, class = "dt-tag", category)
+      })
+    )
+  } else {
+    NULL
+  }
 }
 
 article_footer_html <- function(site_dir, site_config, collection, article) {
@@ -769,7 +808,7 @@ write_collection_metadata <- function(site_dir, collection) {
   articles <- to_article_info(site_dir, collection[["articles"]])
 
   # write
-  write_articles_info(articles, collection_json_path(site_dir, collection))
+  write_articles_json(articles, collection_json_path(site_dir, collection))
 
 }
 
@@ -779,22 +818,29 @@ to_article_info <- function(site_dir, articles) {
   })
 }
 
-write_articles_info <- function(articles, path) {
+write_articles_json <- function(articles, path) {
   json <- jsonlite::toJSON(articles, pretty = TRUE, auto_unbox = TRUE)
   json <- paste0(json, "\n")
   writeLines(json, path, sep = "", useBytes = TRUE)
 }
 
+article_contents <- function(path) {
+  contents <- ""
+  html <- xml2::read_html(path)
+  article_html <- xml2::xml_find_first(
+    html,
+    "descendant-or-self::*[(@class and contains(concat(' ', normalize-space(@class), ' '), ' d-article '))]"
+  )
+  if (!is.na(article_html)) {
+    contents <- as_utf8(xml2::xml_text(article_html))
+  }
+  contents
+}
+
 article_info <- function(site_dir, article) {
 
-  as_utf8 <- function(x) {
-    if (is.null(x))
-      NULL
-    else if (Encoding(x) != "UTF-8")
-      iconv(x, from = "", to = "UTF-8")
-    else
-      x
-  }
+  # read article contents
+  contents <- article_contents(article$path)
 
   path <- as_utf8(paste0(url_path(article_site_path(site_dir, article$path)), "/"))
   info <- list(
@@ -809,6 +855,7 @@ article_info <- function(site_dir, article) {
     }),
     date = article$metadata$date,
     categories = as.list(article$metadata$categories),
+    contents = as_utf8(contents),
     preview = resolve_preview_url(article$metadata$preview, path),
     last_modified = time_as_iso_8601(file.info(article$path)$mtime),
     input_file = article$input_file

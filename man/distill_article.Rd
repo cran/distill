@@ -7,6 +7,7 @@
 distill_article(
   toc = FALSE,
   toc_depth = 3,
+  toc_float = TRUE,
   fig_width = 6.5,
   fig_height = 4,
   fig_retina = 2,
@@ -14,8 +15,11 @@ distill_article(
   dev = "png",
   smart = TRUE,
   self_contained = TRUE,
+  highlight = "default",
+  highlight_downlit = TRUE,
   mathjax = "default",
   extra_dependencies = NULL,
+  theme = NULL,
   css = NULL,
   includes = NULL,
   keep_md = FALSE,
@@ -29,6 +33,10 @@ distill_article(
 \item{toc}{\code{TRUE} to include a table of contents in the output}
 
 \item{toc_depth}{Depth of headers to include in table of contents}
+
+\item{toc_float}{Float the table of contents to the left when the article
+is displayed at widths > 1000px. If set to \code{FALSE} or the width is less
+than 1000px the table of contents will be placed above the article body.}
 
 \item{fig_width}{Default width (in inches) for figures}
 
@@ -45,7 +53,7 @@ outputting HTML directly into the markdown document).}
 \item{dev}{Graphics device to use for figure output (defaults to png)}
 
 \item{smart}{Produce typographically correct output, converting straight
-quotes to curly quotes, \code{---} to em-dashes, \code{--} to en-dashes, and
+quotes to curly quotes, \verb{---} to em-dashes, \verb{--} to en-dashes, and
 \code{...} to ellipses.}
 
 \item{self_contained}{Produce a standalone HTML file with no external
@@ -54,6 +62,14 @@ scripts, stylesheets, images, and videos. Note that even for self contained
 documents MathJax is still loaded externally (this is necessary because of
 its size).}
 
+\item{highlight}{Syntax highlighting style. Supported styles include
+"default", "rstudio", "tango", "pygments", "kate", "monochrome", "espresso",
+"zenburn", "breezedark", and  "haddock". Pass NULL to prevent syntax
+highlighting.}
+
+\item{highlight_downlit}{Use the \pkg{downlit} package to highlight
+R code (including providing hyperlinks to function documentation).}
+
 \item{mathjax}{Include mathjax. The "default" option uses an https URL from a
 MathJax CDN. The "local" option uses a local version of MathJax (which is
 copied into the output directory). You can pass an alternate URL or pass
@@ -61,6 +77,8 @@ copied into the output directory). You can pass an alternate URL or pass
 
 \item{extra_dependencies}{Additional function arguments to pass to the
 base R Markdown HTML output formatter \code{\link[rmarkdown]{html_document_base}}}
+
+\item{theme}{CSS file with theme variable definitions}
 
 \item{css}{One or more css files to include}
 

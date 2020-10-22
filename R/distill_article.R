@@ -10,12 +10,28 @@
 #'
 #' @inheritParams rmarkdown::html_document
 #'
+#' @param toc_float Float the table of contents to the left when the article
+#'   is displayed at widths > 1000px. If set to `FALSE` or the width is less
+#'   than 1000px the table of contents will be placed above the article body.
+#' @param smart Produce typographically correct output, converting straight
+#'   quotes to curly quotes, `---` to em-dashes, `--` to en-dashes, and
+#'   `...` to ellipses.
+#' @param highlight Syntax highlighting style. Supported styles include
+#'   "default", "rstudio", "tango", "pygments", "kate", "monochrome", "espresso",
+#'   "zenburn", "breezedark", and  "haddock". Pass NULL to prevent syntax
+#'   highlighting.
+#' @param highlight_downlit Use the \pkg{downlit} package to highlight
+#'   R code (including providing hyperlinks to function documentation).
+#' @param theme CSS file with theme variable definitions
+#'
 #' @import rmarkdown
 #' @import htmltools
+#' @import downlit
 #'
 #' @export
 distill_article <- function(toc = FALSE,
                           toc_depth = 3,
+                          toc_float = TRUE,
                           fig_width = 6.5,
                           fig_height = 4,
                           fig_retina = 2,
@@ -23,8 +39,11 @@ distill_article <- function(toc = FALSE,
                           dev = "png",
                           smart = TRUE,
                           self_contained = TRUE,
+                          highlight = "default",
+                          highlight_downlit = TRUE,
                           mathjax = "default",
                           extra_dependencies = NULL,
+                          theme = NULL,
                           css = NULL,
                           includes = NULL,
                           keep_md = FALSE,
@@ -42,16 +61,22 @@ distill_article <- function(toc = FALSE,
   # table of contents
   args <- c(args, pandoc_toc_args(toc, toc_depth))
 
-  # prevent highlighting
-  args <- c(args, "--no-highlight")
+  # toc_float
+  if (toc_float) {
+    args <- c(args, pandoc_variable_arg("toc-float", "1"))
+  }
+
+  # add highlighting
+  args <- c(args, distill_highlighting_args(highlight))
+
+  # turn off downlit if there is no highlighting at all
+  if (is.null(highlight))
+    highlight_downlit <- FALSE
 
   # add template
   args <- c(args, "--template",
             pandoc_path_arg(distill_resource("default.html")))
 
-  # lua filter
-  args <- c(args, "--lua-filter",
-            pandoc_path_arg(distill_resource("distill.lua")))
 
   # use link citations (so we can do citation conversion)
   args <- c(args, "--metadata=link-citations:true")
@@ -70,8 +95,7 @@ distill_article <- function(toc = FALSE,
   knitr_options$opts_knit$bookdown.internal.label <- TRUE
   knitr_options$opts_hooks <- list()
   knitr_options$opts_hooks$preview <- knitr_preview_hook
-  knitr_options$knit_hooks <- list()
-  knitr_options$knit_hooks$chunk <- knitr_chunk_hook()
+  knitr_options$knit_hooks <- knit_hooks(downlit = highlight_downlit)
 
   # shared variables
   site_config <- NULL
@@ -141,6 +165,7 @@ distill_article <- function(toc = FALSE,
     # list of html dependencies
     html_deps <- list(
       html_dependency_jquery(),
+      html_dependency_anchor(),
       html_dependency_bowser(),
       html_dependency_webcomponents(),
       html_dependency_distill()
@@ -176,17 +201,22 @@ distill_article <- function(toc = FALSE,
     # add site related dependencies
     ensure_site_dependencies(site_config, dirname(input_file))
 
+    # resolve theme from site if it's not specified in the article
+    if ((is.null(theme) || !file.exists(theme))) {
+      theme <- theme_from_site_config(find_site_dir(input_file), site_config)
+    }
+
     # header includes: distill then user
     in_header <- c(metadata_in_header(site_config, metadata, self_contained),
                    citation_references_in_header(input_file, metadata$bibliography),
                    metadata_json,
                    manifest_in_header(site_config, input_file, metadata, self_contained),
                    navigation_in_header_file(site_config),
-                   distill_in_header_file())
+                   distill_in_header_file(theme))
 
     # before body includes: distill then user
     before_body <- c(front_matter_before_body(metadata),
-                     navigation_before_body_file(site_config),
+                     navigation_before_body_file(dirname(input_file), site_config),
                      site_before_body_file(site_config),
                      includes$before_body,
                      listing$html)
@@ -245,6 +275,33 @@ distill_article <- function(toc = FALSE,
   )
 }
 
+distill_highlighting_args <- function(highlight) {
+
+  # The default highlighting is a custom pandoc theme based on
+  # https://github.com/ericwbailey/a11y-syntax-highlighting
+  # It's in a JSON theme file as described here:
+  #
+  #   https://pandoc.org/MANUAL.html#syntax-highlighting
+  #
+  # To create the theme we started with pandoc --print-highlight-style haddock
+  # (since that was the closest pandoc them to textmate) then made
+  # the following changes to create the RStudio textmate version:
+  #
+  #  https://github.com/rstudio/distill/compare/02b241083b8ca5cda90954c6c37e9f11bf830b2c...13fb0f6b34e9d04df0bd24a02980e29105a8f68d#diff-f088084fe658ee281215b486b2f18dab
+  #
+  # all available pandoc highlighting tokens are enumerated here:
+  #
+  #   https://github.com/jgm/skylighting/blob/a1d02a0db6260c73aaf04aae2e6e18b569caacdc/skylighting-core/src/Skylighting/Format/HTML.hs#L117-L147
+  #
+  default <- pandoc_path_arg(distill_resource("a11y.theme"))
+
+  # if it's "rstudio", then use an embedded theme file
+  if (identical(highlight, "rstudio")) {
+    highlight <- pandoc_path_arg(distill_resource("rstudio.theme"))
+  }
+
+  pandoc_highlight_args(highlight, default)
+}
 
 knitr_preview_hook <- function(options) {
   if (isTRUE(options$preview))
@@ -252,35 +309,70 @@ knitr_preview_hook <- function(options) {
   options
 }
 
-# hook to enclose output in div with layout class
-knitr_chunk_hook <- function() {
+knit_hooks <- function(downlit) {
 
-  # capture the default chunk hook
+  # capture the default chunk and source hooks
   previous_hooks <- knitr::knit_hooks$get()
   on.exit(knitr::knit_hooks$restore(previous_hooks), add = TRUE)
   knitr::render_markdown()
   default_chunk_hook <- knitr::knit_hooks$get("chunk")
+  default_source_hook <- knitr::knit_hooks$get("source")
 
-  # hook
-  function(x, options) {
+  # apply chunk hook
+  hooks <- list(
+    chunk = function(x, options) {
+      # apply default layout
+      if (is.null(options$layout))
+        options$layout <- "l-body"
 
-    # apply default layout
-    if (is.null(options$layout))
-      options$layout <- "l-body"
+      # apply default hook and determine padding
+      output <- default_chunk_hook(x, options)
+      pad_chars <- nchar(output) - nchar(sub("^ +", "", output))
+      padding <- paste(rep(' ', pad_chars), collapse = '')
 
-    # apply default hook and determine padding
-    output <- default_chunk_hook(x, options)
-    pad_chars <- nchar(output) - nchar(sub("^ +", "", output))
-    padding <- paste(rep(' ', pad_chars), collapse = '')
+      # enclose default output in div (with appropriate padding)
+      paste0(
+        padding, '<div class="layout-chunk" data-layout="', options$layout, '">\n',
+        output, '\n',
+        padding, '\n',
+        padding, '</div>\n'
+      )
+    }
+  )
 
-    # enclose default output in div (with appropriate padding)
-    paste0(
-      padding, '<div class="layout-chunk" data-layout="', options$layout, '">\n',
-      output, '\n',
-      padding, '\n',
-      padding, '</div>\n'
-    )
+  # apply source and document hook if downlit is enabled
+  if (downlit) {
+
+    # source hook to do downlit processing
+    hooks$source <- function(x, options) {
+      if (options$engine == "R") {
+        code <- highlight(paste0(x, "\n", collapse = ""),
+                          classes_pandoc(),
+                          pre_class = NULL)
+        if (is.na(code)) {
+          default_source_hook(x, options)
+        } else {
+          x <- paste0("<div class=\"sourceCode\"><pre><code>",
+                      code,
+                      "</code></pre></div>")
+          x <- paste0(x, "\n")
+          x
+        }
+      } else {
+        default_source_hook(x, options)
+      }
+    }
+
+    # document hook to inject a fake empty code block a the end of the
+    # document (to force pandoc to including highlighting cssm which it
+    # might not do if all chunks are handled by downlit)
+    hooks$document <- function(x, options) {
+      c(x, "```{.r .distill-force-highlighting-css}", "```")
+    }
   }
+
+  # return hooks
+  hooks
 }
 
 
@@ -301,20 +393,29 @@ validate_pandoc_version <- function() {
 }
 
 
-distill_in_header <- function() {
-  doRenderTags(distill_in_header_html())
+distill_in_header <- function(theme = NULL) {
+  doRenderTags(distill_in_header_html(theme))
 }
 
-distill_in_header_file <- function() {
-  html_file(distill_in_header_html())
+distill_in_header_file <- function(theme = NULL) {
+  html_file(distill_in_header_html(theme))
 }
 
-distill_in_header_html <- function() {
+distill_in_header_html <- function(theme = NULL) {
   distill_html <- html_from_file(
     system.file("rmarkdown/templates/distill_article/resources/distill.html",
                 package = "distill")
   )
-  placeholder_html("distill", distill_html)
+  if (!is.null(theme)) {
+    theme_html <- tagList(
+      includeCSS(distill_resource("base-variables.css")),
+      includeCSS(theme),
+      includeCSS(distill_resource("base-style.css"))
+    )
+  } else {
+    theme_html <- NULL
+  }
+  placeholder_html("distill", distill_html, theme_html)
 }
 
 

@@ -24,9 +24,24 @@ resolve_yaml_listing <- function(input_file, site_config, metadata, yaml_listing
 
   listing_articles <- list()
 
+  categories <- TRUE
+  categories_metadata <- TRUE
+  authors_metadata <- TRUE
+
   for (collection in names(yaml_listing)) {
 
+
     collection <- site_collections(site_dir, site_config)[[collection]]
+
+    if (identical(collection[["categories"]], FALSE))
+      categories <- FALSE
+
+    if (identical(collection[["categories_metadata"]], FALSE))
+      categories_metadata <- FALSE
+
+    if (identical(collection[["authors_metadata"]], FALSE))
+      authors_metadata <- FALSE
+
 
     articles <- yaml_listing[[collection$name]]
 
@@ -49,7 +64,11 @@ resolve_yaml_listing <- function(input_file, site_config, metadata, yaml_listing
   }
 
   # generate html
-  listing_html <- html_for_articles(listing_articles, caption = metadata$title, categories = TRUE)
+  listing_html <- html_for_articles(listing_articles,
+                                    caption = metadata$title,
+                                    categories = categories,
+                                    categories_metadata = categories_metadata,
+                                    authors_metadata = authors_metadata)
 
   listing <- list(
     html = html_file(listing_html)
@@ -94,8 +113,10 @@ generate_listing <- function(input_file,
 
 article_listing_html <- function(site_dir, metadata, collection, articles) {
 
-  # detect whether we are showing categories in the sidebar
+  # detect whether we are showing categories (sidebar and inline)
   categories <- not_null(collection[["categories"]], TRUE)
+  categories_metadata <- not_null(collection[["categories_metadata"]], TRUE)
+  authors_metadata <- not_null(collection[["authors_metadata"]], TRUE)
 
   # check for subscription
   subscription_html <- subscription_html(site_dir, collection)
@@ -117,48 +138,61 @@ article_listing_html <- function(site_dir, metadata, collection, articles) {
   html_for_articles(articles,
                     caption = metadata$title,
                     categories = categories,
+                    categories_metadata = categories_metadata,
+                    authors_metadata = authors_metadata,
                     subscription_html = subscription_html,
                     custom_html = custom_html)
 }
 
-html_for_articles <- function(articles, caption = NULL, categories = FALSE, subscription_html = NULL, custom_html = NULL) {
+html_for_articles <- function(articles, caption = NULL, categories = FALSE, categories_metadata = FALSE, authors_metadata = FALSE, subscription_html = NULL, custom_html = NULL) {
 
   # generate categories listing
   categories_html <- if (categories) categories_listing_html(articles)
 
   # generate html
+  article_index <- 0
   articles_html <- lapply(articles, function(article) {
+
+    # bump article index
+    article_index <<- article_index + 1
 
     # metadata
     metadata <- list()
     metadata$categories <- as.character(article[["categories"]])
 
     if (!is.null(article$preview))
-      preview <- img(`data-src` = article$preview)
+      if (article_index <= 5)
+        preview <- img(src = article$preview)
+      else
+        preview <- img(`data-src` = article$preview)
     else
       preview <- NULL
+
+    if (categories_metadata)
+      categories_metadata_html <- html_for_categories_metadata(article)
+    else
+      categories_metadata_html <- NULL
 
     a(href = article$path, class = "post-preview",
       tags$script(class = "post-metadata", type = "text/json",
                   HTML(jsonlite::toJSON(metadata))),
       div(class = "metadata",
-        div(class = "publishedDate", date_as_abbrev(article$date))
+        div(class = "publishedDate", date_as_abbrev(article$date)),
+        if (authors_metadata) html_for_author(article$author)
       ),
       div(class = "thumbnail", preview),
       div(class = "description",
         h2(article$title),
+        categories_metadata_html,
         p(article$description)
       )
     )
   })
 
-  # prepend caption if we have it
-  if (!is.null(caption)) {
-    articles_html <- htmltools::tagList(
-      h1(class = "posts-list-caption", caption),
-      articles_html
-    )
-  }
+  articles_html <- htmltools::tagList(
+    h1(class = "posts-list-caption", `data-caption` = caption, caption),
+    articles_html
+  )
 
   # more posts link
   more_posts <- div(class = "posts-more",
@@ -192,6 +226,30 @@ html_for_articles <- function(articles, caption = NULL, categories = FALSE, subs
         more_posts
       )
     ))
+  }
+}
+
+html_for_categories_metadata <- function(article) {
+  if (is.list(article[["categories"]])) {
+    tags <- lapply(article[["categories"]], function(category) {
+      div(class = "dt-tag", category)
+    })
+    div(class = "dt-tags", tags)
+  } else {
+    NULL
+  }
+}
+
+
+html_for_author <- function(author) {
+  author <- fixup_author(author)
+  if (!is.null(author)) {
+    tags <- lapply(author, function(auth) {
+      div(class = "dt-author", auth$name)
+    })
+    div(class = "dt-authors", tags)
+  } else {
+    NULL
   }
 }
 
@@ -240,13 +298,22 @@ categories_listing_html <- function(articles) {
     indexes <- order(names(categories))
     categories <- categories[indexes]
 
+    # caption for 'all articles'
+    all_articles <- "Articles"
+    if (identical(names(categories), tolower(names(categories))))
+      all_articles <- tolower(all_articles)
+
     # generate html
     tags$div(class = "sidebar-section categories",
       tags$h3("Categories"),
       tags$ul(
+        tags$li(
+          tags$a(href = category_hash(all_articles), all_articles),
+          tags$span(class = "category-count", sprintf("(%d)", length(articles)))
+        ),
         lapply(names(categories), function(name) {
           tags$li(
-            tags$a(href = paste0("#",gsub(" ", "_", name)), name),
+            tags$a(href = category_hash(name), name),
             tags$span(class = "category-count", sprintf("(%d)", categories[[name]]))
           )
         })
@@ -258,6 +325,10 @@ categories_listing_html <- function(articles) {
   }
 }
 
+
+category_hash <- function(category) {
+  paste0("#category:",gsub(" ", "_", category))
+}
 
 
 articles_info <- function(site_dir, collection) {
