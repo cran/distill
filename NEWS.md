@@ -1,4 +1,20 @@
-## distill v1.1 (CRAN)
+## distill v1.2 (CRAN)
+
+-   Support for optional user display of source code via the `code_folding` option.
+-   Display citation popup when hovering over references.
+-   Definitely fix issue w/ importing articles from git repos with `main` default branch. (\#215)
+-   Fix an issue with highlighting on Windows when there is a space in the resource's path (\#236).
+-   Add optional cookie consent overlay for opt-in to Google Analytics and Disqus.
+-   Support for including pages that use alternate R Markdown formats within Distill websites.
+-   Automatically register collections referenced in `listings` YAML metadata.
+-   Enhance `create_article()` function to create articles from alternate formats.
+-   Fix issue w/ broken images in search results for pages with no preview image.
+-   Fix issue w/ attempting to add non-site Rmds (e.g. README.Rmd) to search index.
+-   Fix issue w/ duplicate `includes` within website articles
+-   Suppress citation for individual articles/posts via `citation: false` metadata.
+-   Add `sourceCode` class to pre and code tags for downlit output.
+
+## distill v1.1
 
 -   Fixed issue with `overflow: hidden` for code blocks on mobile devices (is now `overflow: auto`).
 -   Improve full text search behavior w/ `ignoreLocation: true` and `threshold: 0`.

@@ -12,6 +12,11 @@ enumerate_collection <- function(site_dir, site_config, collection) {
   # collection_dir
   collection_dir <- file.path(site_dir, paste0("_", collection$name))
 
+  # ensure that it exists
+  if (!dir_exists(collection_dir)) {
+    dir.create(collection_dir)
+  }
+
   # build a list of articles in the collection
   articles <- list()
 
@@ -312,6 +317,21 @@ move_feed_categories_xml <- function(main_feed, site_config) {
   }
 }
 
+front_matter_listings <- function(input_file, encoding, full_only = FALSE) {
+  metadata <- yaml_front_matter(input_file, encoding)
+  if (!is.null(metadata$listing)) {
+    if (is.list(metadata$listing))
+      if (!full_only)
+        names(metadata$listing)
+      else
+        c()
+    else
+      metadata$listing
+  } else {
+    c()
+  }
+}
+
 update_collection_listing <- function(site_dir, site_config, collection, article, encoding,
                                       input_file) {
 
@@ -521,7 +541,7 @@ render_collection_article <- function(site_dir, site_config, collection, article
 
   # categories
   index_content <- fill_placeholder(index_content, "categories", placeholder_html(
-    "categories", categories_html(collection, offset, article)
+    "categories", categories_html(site_dir, collection, offset, article)
   ))
 
   # article footer
@@ -553,15 +573,34 @@ render_collection_article <- function(site_dir, site_config, collection, article
   index_html
 }
 
-categories_html <- function(collection, offset, article) {
+categories_html <- function(site_dir, collection, offset, article) {
 
-  if (identical(collection$name, "posts") && !is.null(article$metadata$categories)) {
-    div(class = "dt-tags",
-      lapply(article$metadata$categories, function(category) {
-        href <- paste0(offset, "/index.html", category_hash(category))
-        a(href = href, class = "dt-tag", category)
-      })
-    )
+  if (!is.null(article$metadata$categories)) {
+
+    # see if there is a listings page we can point categories at
+    listings_page_html <- NULL
+    input_files <- list.files(site_dir, pattern = "^[^_].*\\.[Rr]?md$")
+    for (file in input_files) {
+      file_path = file.path(site_dir, file)
+      listings <- front_matter_listings (file_path, "UTF-8", TRUE)
+      if (collection$name %in% listings) {
+        listings_page_html <- file_with_ext(file, "html")
+        break
+      }
+    }
+
+    # generate categories
+    if (!is.null(listings_page_html)) {
+      div(class = "dt-tags",
+        lapply(article$metadata$categories, function(category) {
+          href <- paste0(offset, "/", listings_page_html, category_hash(category))
+          a(href = href, class = "dt-tag", category)
+        })
+      )
+
+    } else {
+      NULL
+    }
   } else {
     NULL
   }
@@ -642,8 +681,8 @@ article_footer_html <- function(site_dir, site_config, collection, article) {
   # disqus
   disqus <- NULL
   disqus_script <- NULL
-  if (!is.null(disqus_shortname)) {
 
+  if (!is.null(disqus_shortname)) {
     disqus <- tags$span(class = "disqus-comments",
       tag("i", list(class = "fas fa-comments")),
       HTML("&nbsp;"),
@@ -659,7 +698,9 @@ article_footer_html <- function(site_dir, site_config, collection, article) {
 
       tags$div(id = "disqus_thread", class = disqus_class),
 
-      tags$script(HTML(paste(sep = "\n",
+      tags$script(type = cc_check(site_config),
+                  `cookie-consent` = "functionality",
+        HTML(paste(sep = "\n",
           sprintf(paste(sep = "\n",
               "\nvar disqus_config = function () {",
               "  this.page.url = '%s';",
@@ -833,6 +874,9 @@ article_contents <- function(path) {
     html,
     "descendant-or-self::*[(@class and contains(concat(' ', normalize-space(@class), ' '), ' d-article '))]"
   )
+  if (is.na(article_html)) {
+    article_html <- xml2::xml_find_first(html, "//body")
+  }
   if (!is.na(article_html)) {
     contents <- as_utf8(xml2::xml_text(article_html))
   }
@@ -914,6 +958,13 @@ site_collections <- function(site_dir, site_config) {
   }
   ensure_collection("posts")
   ensure_collection("articles")
+
+  # add any collection with a listing
+  input_files <- list.files(site_dir, pattern = "^[^_].*\\.[Rr]?md$", full.names = TRUE)
+  sapply(input_files, function(file) {
+    listings <- front_matter_listings(file, "UTF-8")
+    sapply(listings, ensure_collection)
+  })
 
   # filter on directory existence
   collections <- collections[file.exists(file.path(site_dir, paste0("_", names(collections))))]

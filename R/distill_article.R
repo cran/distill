@@ -16,6 +16,11 @@
 #' @param smart Produce typographically correct output, converting straight
 #'   quotes to curly quotes, `---` to em-dashes, `--` to en-dashes, and
 #'   `...` to ellipses.
+#' @param code_folding Include code blocks hidden, and allow users to
+#'   optionally display the code by clicking a "Show code" button just above
+#'   the output. Pass a character vector to customize the text of the
+#'   "Show code" button. You can also specify `code_folding` as chunk option
+#'   for per-chunk folding behavior.
 #' @param highlight Syntax highlighting style. Supported styles include
 #'   "default", "rstudio", "tango", "pygments", "kate", "monochrome", "espresso",
 #'   "zenburn", "breezedark", and  "haddock". Pass NULL to prevent syntax
@@ -38,6 +43,7 @@ distill_article <- function(toc = FALSE,
                           fig_caption = TRUE,
                           dev = "png",
                           smart = TRUE,
+                          code_folding = FALSE,
                           self_contained = TRUE,
                           highlight = "default",
                           highlight_downlit = TRUE,
@@ -87,19 +93,30 @@ distill_article <- function(toc = FALSE,
                                       fig_retina = fig_retina,
                                       keep_md = keep_md,
                                       dev = dev)
-  knitr_options$opts_chunk$echo <- FALSE
+  knitr_options$opts_chunk$echo <- identical(code_folding, FALSE)
   knitr_options$opts_chunk$warning <- FALSE
   knitr_options$opts_chunk$message <- FALSE
   knitr_options$opts_chunk$comment <- NA
   knitr_options$opts_chunk$R.options <- list(width = 70)
+  knitr_options$opts_chunk$code_folding <- code_folding
   knitr_options$opts_knit$bookdown.internal.label <- TRUE
   knitr_options$opts_hooks <- list()
   knitr_options$opts_hooks$preview <- knitr_preview_hook
+  knitr_options$opts_hooks$code_folding <- function(options) {
+    if (!identical(code_folding, FALSE)) {
+      options[["echo"]] <- TRUE
+    }
+    options
+  }
   knitr_options$knit_hooks <- knit_hooks(downlit = highlight_downlit)
 
   # shared variables
   site_config <- NULL
   encoding <- NULL
+
+  # metadata_includes are includes derived from this file's metadata
+  # (as opposed to site level includes which we already process)
+  metadata_includes <- list()
 
   # post-knit
   post_knit <- function(metadata, input_file, runtime, encoding, ...) {
@@ -109,6 +126,15 @@ distill_article <- function(toc = FALSE,
 
     # run R code in metadata
     metadata <- eval_metadata(metadata)
+
+    # determine metadata_includes
+    metadata_output <- metadata[["output"]]
+    if (is.list(metadata_output)) {
+      metadata_distill <- metadata_output[["distill::distill_article"]]
+      if (is.list(metadata_distill)) {
+        metadata_includes <<- metadata_distill[["includes"]]
+      }
+    }
 
     # pandoc args
     args <- c()
@@ -162,14 +188,22 @@ distill_article <- function(toc = FALSE,
     # create metadata json
     metadata_json <- embedded_metadata(embedable_metadata)
 
-    # list of html dependencies
-    html_deps <- list(
-      html_dependency_jquery(),
+    # list of html dependencies (if we navigation then we get jquery
+    # from site dependencies so don't include it here)
+    html_deps <- list()
+    if (!have_navigation(site_config)) {
+      html_deps <- list(html_dependency_jquery())
+    } else {
+      html_deps <- list()
+    }
+    html_deps <- append(html_deps, list(
+      html_dependency_popper(),
+      html_dependency_tippy(),
       html_dependency_anchor(),
       html_dependency_bowser(),
       html_dependency_webcomponents(),
       html_dependency_distill()
-    )
+    ))
 
     # resolve listing
     listing <- list()
@@ -218,11 +252,11 @@ distill_article <- function(toc = FALSE,
     before_body <- c(front_matter_before_body(metadata),
                      navigation_before_body_file(dirname(input_file), site_config),
                      site_before_body_file(site_config),
-                     includes$before_body,
+                     metadata_includes$before_body,
                      listing$html)
 
     # after body includes: user then distill
-    after_body <- c(includes$after_body,
+    after_body <- c(metadata_includes$after_body,
                     site_after_body_file(site_config),
                     appendices_after_body_file(input_file, site_config, metadata),
                     navigation_after_body_file(dirname(input_file), site_config))
@@ -242,7 +276,7 @@ distill_article <- function(toc = FALSE,
   pre_processor <- function(yaml_front_matter, utf8_input, runtime, knit_meta,
                             files_dir, output_dir, ...) {
     pandoc_include_args(in_header = c(site_in_header_file(site_config),
-                                      includes$in_header))
+                                      metadata_includes$in_header))
   }
 
   on_exit <- function() {
@@ -293,14 +327,14 @@ distill_highlighting_args <- function(highlight) {
   #
   #   https://github.com/jgm/skylighting/blob/a1d02a0db6260c73aaf04aae2e6e18b569caacdc/skylighting-core/src/Skylighting/Format/HTML.hs#L117-L147
   #
-  default <- pandoc_path_arg(distill_resource("arrow.theme"))
+  default <- distill_resource("arrow.theme")
 
   # if it's "rstudio", then use an embedded theme file
   if (identical(highlight, "rstudio")) {
-    highlight <- pandoc_path_arg(distill_resource("rstudio.theme"))
+    highlight <- distill_resource("rstudio.theme")
   }
 
-  pandoc_highlight_args(highlight, default)
+  rmarkdown::pandoc_highlight_args(highlight, default)
 }
 
 knitr_preview_hook <- function(options) {
@@ -340,29 +374,42 @@ knit_hooks <- function(downlit) {
     }
   )
 
-  # apply source and document hook if downlit is enabled
-  if (downlit) {
+  # source hook to do downlit processing and code_folding
+  hooks$source <- function(x, options) {
 
-    # source hook to do downlit processing
-    hooks$source <- function(x, options) {
-      if (options$engine == "R") {
-        code <- highlight(paste0(x, "\n", collapse = ""),
-                          classes_pandoc(),
-                          pre_class = NULL)
-        if (is.na(code)) {
-          default_source_hook(x, options)
-        } else {
-          x <- paste0("<div class=\"sourceCode\"><pre><code>",
-                      code,
-                      "</code></pre></div>")
-          x <- paste0(x, "\n")
-          x
-        }
+    code_folding <- not_null(options[["code_folding"]], FALSE)
+
+    if (downlit && options$engine == "R") {
+      code <- highlight(paste0(x, "\n", collapse = ""),
+                        classes_pandoc(),
+                        pre_class = NULL)
+      if (is.na(code)) {
+        x <- default_source_hook(x, options)
       } else {
-        default_source_hook(x, options)
+        x <- paste0("<div class=\"sourceCode\">",
+                    "<pre class=\"sourceCode r\">",
+                    "<code class=\"sourceCode r\">",
+                    code,
+                    "</code></pre></div>")
+        x <- paste0(x, "\n")
       }
+    } else {
+      x <- default_source_hook(x, options)
     }
 
+    if (!identical(code_folding, FALSE)) {
+      if (identical(code_folding, TRUE)) {
+        code_folding <- "Show code"
+      } else {
+        code_folding <- as.character(code_folding)
+      }
+      x <- paste0("<details>\n<summary>", code_folding ,"</summary>\n", x, "\n</details>")
+    }
+
+    x
+  }
+
+  if (downlit) {
     # document hook to inject a fake empty code block a the end of the
     # document (to force pandoc to including highlighting cssm which it
     # might not do if all chunks are handled by downlit)
@@ -406,17 +453,24 @@ distill_in_header_html <- function(theme = NULL) {
     system.file("rmarkdown/templates/distill_article/resources/distill.html",
                 package = "distill")
   )
+  theme_html <- theme_in_header_html(theme)
+  placeholder_html("distill", distill_html, theme_html)
+}
+
+theme_in_header_html <- function(theme) {
   if (!is.null(theme)) {
-    theme_html <- tagList(
+    tagList(
       includeCSS(distill_resource("base-variables.css")),
       includeCSS(theme),
       includeCSS(distill_resource("base-style.css"))
     )
   } else {
-    theme_html <- NULL
+    NULL
   }
-  placeholder_html("distill", distill_html, theme_html)
 }
 
+theme_in_header_file <- function(theme) {
+  html_file(theme_in_header_html(theme))
+}
 
 
