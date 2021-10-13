@@ -276,11 +276,11 @@ fixup_navigation_paths <- function(file, site_dir, site_config, offset) {
 
   # process if necessary
   if (!is.null(offset)) {
-    html <- xml2::read_xml(file)
+    html <- xml2::read_html(file)
     fixup_element_paths(html, "a", "href")
     fixup_element_paths(html, "img", "src")
     tmp <- tempfile(fileext = ".html")
-    xml2::write_xml(html, tmp, options = c("format", "no_declaration"))
+    xml2::write_html(html, tmp, options = c("format", "no_declaration"))
     file <- tmp
   }
 
@@ -312,7 +312,7 @@ render_navigation_html <- function(navigation_html) {
 render_navigation_html_file <- function(navigation_html) {
   html <- render_navigation_html(navigation_html)
   file <- tempfile(fileext = "html")
-  writeLines(html, file)
+  writeLines(html, file, useBytes = TRUE)
   file
 }
 

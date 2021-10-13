@@ -408,11 +408,12 @@ update_collection_listing <- function(site_dir, site_config, collection, article
         html_content <- readChar(html_file,
                                  nchars = file.info(html_file)$size,
                                  useBytes = TRUE)
-        listing_html <- strip_trailing_newline(
-          readChar(listing$html,
-                   nchars = file.info(listing$html)$size,
-                   useBytes = TRUE)
-        )
+        Encoding(html_content) <- "UTF-8"
+        listing_html <- readChar(listing$html,
+                                 nchars = file.info(listing$html)$size,
+                                 useBytes = TRUE)
+        Encoding(listing_html) <- "UTF-8"
+        listing_html <- strip_trailing_newline(listing_html)
         html_content <- fill_placeholder(html_content, "article_listing", listing_html)
         writeChar(html_content, html_file, eos = NULL, useBytes = TRUE)
       }
@@ -429,7 +430,7 @@ render_collection_article <- function(site_dir, site_config, collection, article
                                       quiet = FALSE) {
 
   # strip site_dir prefix
-  article_site_path <- collection_article_site_path(site_dir, article$path)
+  article_site_path <- xfun::relative_path(article$path, site_dir, use.. = FALSE)
 
   # determine the target output dir
   output_dir <- collection_article_output_dir(site_dir, site_config, article_site_path)
@@ -744,10 +745,6 @@ strip_trailing_newline <- function(x) {
     substring(x, 1, nchar(x) - 1)
   else
     x
-}
-
-collection_article_site_path <- function(site_dir, article_path) {
-  sub(paste0("^", site_dir, "/"), "", article_path)
 }
 
 collection_article_output_dir <- function(site_dir, site_config, article_site_path) {
