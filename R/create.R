@@ -13,7 +13,7 @@
 #' @param edit Open site index file or welcome post in an editor.
 #'
 #' @note The `dir` and `title` parameters are required (they will be prompted for
-#'   interatively if they are not specified).
+#'   interactively if they are not specified).
 #'
 #' @examples
 #' \dontrun{
@@ -22,8 +22,8 @@
 #' }
 #' @export
 create_website <- function(dir, title, gh_pages = FALSE, edit = interactive()) {
-  do_create_website(dir, title, gh_pages, edit, "website")
-  render_website(dir, "website")
+  params <- do_create_website(dir, title, gh_pages, edit, "website")
+  render_website(params$dir, "website")
   invisible(NULL)
 }
 

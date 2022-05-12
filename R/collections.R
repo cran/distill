@@ -672,8 +672,8 @@ article_footer_html <- function(site_dir, site_config, collection, article) {
     share <- tags$span(class = "article-sharing",
       HTML("Share: &nbsp;"),
       tagList(lapply(share_services, function(service) {
-        tags$a(href = sharing_link(service),
-          tag("i", list(class = sprintf("fab fa-%s", service)))
+        tags$a(href = sharing_link(service), `aria-label` = sprintf("share on %s", service),
+          tag("i", list(class = sprintf("fab fa-%s", service), `aria-hidden` = "true"))
         )
       }))
     )
@@ -875,6 +875,13 @@ article_contents <- function(path) {
     article_html <- xml2::xml_find_first(html, "//body")
   }
   if (!is.na(article_html)) {
+    # remove script tag content for article content
+    scripts <- xml2::xml_find_all(article_html, "//script")
+    xml2::xml_remove(scripts)
+    # remove style tag content for article content
+    style <- xml2::xml_find_all(article_html, "//style")
+    xml2::xml_remove(style)
+
     contents <- as_utf8(xml2::xml_text(article_html))
   }
   contents
