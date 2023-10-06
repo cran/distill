@@ -1,9 +1,18 @@
-# distill 1.5 (CRAN)
+# distill 1.6 (CRAN)
 
--   Add support for [CC0](https://creativecommons.org/share-your-work/public-domain/cc0/) license in `creative_commons` (thanks, \\\@fkohrt, #431).
--   Fix an issue with **gt** table and font size (thanks, \\\@ymer,\\\@lmlicuanan, #399).
--   Fix an issue with hovering on citation references (thanks, \\\@Abhi-1U).
--   Fix an issue with bibliography and date parsing (thanks, \\\@mitchelloharawild, #468).
+-   RSS feed creation now works correctly for listings when no `description` is provided in one of the Rmd post (thanks, \@cpsyctc, \@apeterson91, #490, #448).
+-   Fix an issue with line numbering on code chunks when `highlight-downlit: false` by tweaking Pandoc's default CSS rules (thanks, \@SES-CE, #473).
+-   Internally use `format()` instead of `as.character()` with Dates to account for argument `format=` deprecation in R 4.3.0 (thanks, \@mbojan, #488).
+-   Add a `subtitle` variable in HTML template placed between title and categories (thanks, \@dicook, #480).
+-   Add author name in orcid image alt text (thanks, \@mitchelloharawild , \@ajrgodfrey, #494, rjournal/rjtools#86).
+-   In `distill_article()`, metadata header in HTML is separated by `<hr>` to improve accessibility (thanks, @mitchelloharawild, #495, @ajrgodfrey, #rjournal/rjtools#92)
+
+# distill 1.5
+
+-   Add support for [CC0](https://creativecommons.org/public-domain/cc0/) license in `creative_commons` (thanks, \@fkohrt, #431).
+-   Fix an issue with **gt** table and font size (thanks, \@ymer, \@lmlicuanan, #399).
+-   Fix an issue with hovering on citation references (thanks, \@Abhi-1U).
+-   Fix an issue with bibliography and date parsing (thanks, \@mitchelloharawild, #468).
 -   Fix an issue with compatibility with Pandoc 2.17+ which were breaking some **bookdown** feature supported by **distill**, like text references (thanks, \@eliocamp, #463).
 -   Fix an issue with blank HTML in browser when a `@` is used unescaped in a document without `bibliography` YAML key (thanks, \@L-Groeninger, #466).
 
